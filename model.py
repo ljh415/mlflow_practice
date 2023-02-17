@@ -7,7 +7,7 @@ from torchvision.models import resnet50
 
 class TestResNet(nn.Module):
     """
-    Using ResNet50, cifar100 dataset only
+    Using ResNet50, cifar10 dataset only
 
     Args:
         nn (_type_): _description_

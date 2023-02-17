@@ -35,7 +35,6 @@ def train():
     # dataset
     data = datasets.CIFAR10(root='~/data', train=True, transform=transform, download=True)
     train_data, valid_data = random_split(data, [int(len(data)*0.8), len(data)-int(len(data)*0.8)])
-    # test_data = datasets.CIFAR100(root='~/data', train=False)
     
     train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
     valid_dataloader = DataLoader(valid_data, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
@@ -43,11 +42,13 @@ def train():
     metric_acc = Accuracy(task='multiclass', num_classes=10).to(device)
     
     # model
-    model = TestResNet(init_layers=0).to(device)
+    model = TestResNet(init_layers=args.init_layers).to(device)
     
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     criterion = torch.nn.CrossEntropyLoss().to(device)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, mode='min', factor=0.1, verbose=True)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2, eta_min=0.001)
     
     for epoch in range(args.epochs):
         model.train()
@@ -57,10 +58,8 @@ def train():
         running_acc = 0
         
         for batch_idx, (img_batch, target_batch) in enumerate(train_dataloader):
+            # now_lr = args.lr
             now_lr = scheduler.optimizer.param_groups[0]['lr']
-            
-            if batch_idx == 1000:
-                break
             
             optimizer.zero_grad()
             
@@ -88,7 +87,6 @@ def train():
             )
             
             print(status, end="")
-            # sys.exit(1)
             
         print()
         ## validate
@@ -99,9 +97,6 @@ def train():
         with torch.no_grad():
             model.eval()
             for batch_idx, (img_batch, target_batch) in enumerate(valid_dataloader):
-                
-                if batch_idx == 1000:
-                    break
                 
                 img = img_batch.to(device)
                 target = target_batch.to(device)
@@ -132,12 +127,13 @@ def train():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=1e-1)
+    parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--device_id", type=int, default=0)
     parser.add_argument("--cuda", type=bool, default=True)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--init_layers", type=int, default=1)
     
     args = parser.parse_args()    
     # params = Params(args.batch_size, args.epochs, args.lr, args.num_workers, args.device_id, args.cuda)
