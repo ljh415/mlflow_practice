@@ -1,4 +1,5 @@
 import random
+import datetime
 import numpy as np
 
 import torch
@@ -12,3 +13,9 @@ def fix_seed():
     cudnn.benchmark = False
     cudnn.deterministic = True
     random.seed(0)
+    
+def get_now(time=False):
+    now = datetime.datetime.now()
+    if time:
+        return now.strftime("%y%m%d-%H%M")
+    return now.strftime("%y%m%d")

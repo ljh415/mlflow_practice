@@ -1,6 +1,7 @@
 import os
 import time
 import argparse
+import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
 
@@ -10,11 +11,14 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, random_split
 
-import mlflow
 from torchmetrics import Accuracy
 
+import mlflow
+from mlflow.models.signature import ModelSignature
+from mlflow.types.schema import Schema, TensorSpec
+
 from model import TestResNet
-from utils import fix_seed
+from utils import fix_seed, get_now
 
 fix_seed()
 
@@ -46,90 +50,134 @@ def train():
     
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     criterion = torch.nn.CrossEntropyLoss().to(device)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, mode='min', factor=0.1, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, mode='min', factor=0.5, verbose=True)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2, eta_min=0.001)
     
-    for epoch in range(args.epochs):
-        model.train()
+    
+    with mlflow.start_run(
+        run_name = f"test_{get_now(True)}"
+        ) as run:
         
-        step = 0
-        running_loss = 0
-        running_acc = 0
         
-        for batch_idx, (img_batch, target_batch) in enumerate(train_dataloader):
-            # now_lr = args.lr
-            now_lr = scheduler.optimizer.param_groups[0]['lr']
-            
-            optimizer.zero_grad()
-            
-            img = img_batch.to(device)
-            target = target_batch.to(device)
-            
-            pred = model(img)
-
-            loss = criterion(pred, target)
-            acc = metric_acc(pred, target)
-            
-            running_loss += loss.detach().cpu()
-            running_acc += acc.detach().cpu()
-            
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
-            
-            step += 1
-            
-            status = (
-                "\r> epoch: {:3d} > step: {:3d} > loss: {:.3f}, lr: {:.3f}, acc: {:.2f}".format(
-                    epoch+1, step, running_loss/(batch_idx+1), now_lr, running_acc/(batch_idx+1)
-                )
-            )
-            
-            print(status, end="")
-            
-        print()
-        ## validate
+        # logging_params
+        mlflow.log_params({
+            'init_lr': args.lr,
+        })
         
-        running_val_loss = 0
-        running_val_acc = 0
-        
-        with torch.no_grad():
-            model.eval()
-            for batch_idx, (img_batch, target_batch) in enumerate(valid_dataloader):
+        for epoch in range(args.epochs):
+            cur_lr = scheduler.optimizer.param_groups[0]['lr']
+            
+            model.train()
+            
+            step = 0
+            running_loss = 0
+            running_acc = 0
+            
+            
+            for batch_idx, (img_batch, target_batch) in enumerate(train_dataloader):
+                # now_lr = args.lr
+                
+                optimizer.zero_grad()
                 
                 img = img_batch.to(device)
                 target = target_batch.to(device)
                 
                 pred = model(img)
+
+                loss = criterion(pred, target)
+                acc = metric_acc(pred, target)
                 
-                val_loss = criterion(pred, target)
-                val_acc = metric_acc(pred, target)
+                running_loss += loss.detach().cpu()
+                running_acc += acc.detach().cpu()
                 
-                running_val_loss += val_loss.detach().cpu()
-                running_val_acc += val_acc.detach().cpu()
+                loss.backward()
+                optimizer.step()
+                
+                step += 1
                 
                 status = (
-                    "\r validation : {:6d} / {:6d}".format(
-                        batch_idx+1,
-                        len(valid_dataloader)
+                    "\r> epoch: {:3d} > step: {:3d} > loss: {:.3f}, lr: {:.3f}, acc: {:.2f}".format(
+                        epoch+1, step, running_loss/(batch_idx+1), cur_lr, running_acc/(batch_idx+1)
                     )
                 )
+                
                 print(status, end="")
+            train_loss = running_loss / len(train_dataloader)
+            train_acc = running_acc / len(train_dataloader)
+            
+            print()
+            ## validate
+            
+            running_val_loss = 0
+            running_val_acc = 0
+            
+            with torch.no_grad():
+                model.eval()
+                for batch_idx, (img_batch, target_batch) in enumerate(valid_dataloader):
+                    
+                    img = img_batch.to(device)
+                    target = target_batch.to(device)
+                    
+                    pred = model(img)
+                    
+                    val_loss = criterion(pred, target)
+                    val_acc = metric_acc(pred, target)
+                    
+                    running_val_loss += val_loss.detach().cpu()
+                    running_val_acc += val_acc.detach().cpu()
+                    
+                    status = (
+                        "\r validation : {:6d} / {:6d}".format(
+                            batch_idx+1,
+                            len(valid_dataloader)
+                        )
+                    )
+                    print(status, end="")
+            
+            val_loss = running_val_loss / len(valid_dataloader)
+            val_acc = running_val_acc / len(valid_dataloader)
+            print("\nValidation loss: {:3f}, acc: {:.2f}\n".format(val_loss, val_acc))
+            
+            scheduler.step(metrics=val_loss)
+            
+            ### mlflow logging
+            mlflow.log_metrics({
+                'train_accuracy': train_acc.numpy().item(),
+                'train_loss': train_loss.numpy().item(),
+                'validation_accuracy': val_acc.numpy().item(),
+                'validation_loss': val_loss.numpy().item(),
+                'lr': cur_lr
+            })
         
-        val_loss = running_val_loss / len(valid_dataloader)
-        val_acc = running_val_acc / len(valid_dataloader)
-        print("\nValidation loss: {:3f}, acc: {:.2f}\n".format(val_loss, val_acc))
-        
+        print("@@@"*40)
+        print('make signature')
+        print(img.shape)
+        print(type(img))
+        print(pred.shape)
+        # model_signature = infer_signature(train_data, pred)
+        input_schema = Schema([
+            TensorSpec(np.dtype(np.float32), (-1, 3, 32, 32))
+        ])
+        output_schema = Schema([
+            TensorSpec(np.dtype(np.float32), (-1, 10))
+        ])
+        mlflow.pytorch.log_model(
+            model,
+            artifact_path='test_resnet',
+            signature=ModelSignature(inputs=input_schema, outputs=output_schema),
+        )
+        print("Model saved in run %s" % mlflow.active_run().info.run_uuid)
+
     
     # print(model)
     
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=1e-2)
+    parser.add_argument("--lr", type=float, default=1e-1)
     parser.add_argument("--device_id", type=int, default=0)
     parser.add_argument("--cuda", type=bool, default=True)
     parser.add_argument("--num_workers", type=int, default=4)
