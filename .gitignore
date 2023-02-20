@@ -3,3 +3,4 @@ notebooks/
 __pycache__/
 .vscode/
 mlruns/
+model_dir/

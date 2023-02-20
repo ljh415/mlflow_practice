@@ -1,0 +1,12 @@
+name: resnet_test
+
+docker_env:
+  image: mlflow_test
+
+entry_points:
+  main:
+    parameters:
+      batch_size: {type: int, default: 32}
+      epochs: {type: int, default: 1}
+      lr: {type: float, default: 1e-1}
+    command: "pwd|python train.py --batch_size {batch_size} --epochs {epochs} --lr {lr}"

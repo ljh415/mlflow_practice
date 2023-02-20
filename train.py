@@ -23,9 +23,22 @@ from utils import fix_seed, get_now
 fix_seed()
 
 def train():
-    
-    # print(vars(params))
-    # sys.exit()
+    conda_env = {
+        'channels': ['conda-forge'],
+        'dependencies': [
+            'python=3.9.16',
+            'pip<=22.3.1'],
+        'pip': [
+            'mlflow<3,>=2.1',
+            'cloudpickle==2.2.1',
+            'ipython==8.10.0',
+            'torchmetrics==0.11.1',
+            'torch==1.12.1',
+            'torchvision==0.13.1',
+            '--extra-index-url https://download.pytorch.org/whl/cu113'
+        ],
+        'name': 'mlflow-env'
+    }
     
     device = f"cuda:{args.device_id}" if args.cuda else "cpu"
     
@@ -50,7 +63,7 @@ def train():
     
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     criterion = torch.nn.CrossEntropyLoss().to(device)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, mode='min', factor=0.5, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=4, mode='min', factor=0.5, verbose=True)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2, eta_min=0.001)
     
@@ -59,7 +72,7 @@ def train():
         run_name = f"test_{get_now(True)}"
         ) as run:
         
-        
+
         # logging_params
         mlflow.log_params({
             'init_lr': args.lr,
@@ -77,6 +90,9 @@ def train():
             
             for batch_idx, (img_batch, target_batch) in enumerate(train_dataloader):
                 # now_lr = args.lr
+                
+                if batch_idx == 50:
+                    break
                 
                 optimizer.zero_grad()
                 
@@ -116,6 +132,9 @@ def train():
                 model.eval()
                 for batch_idx, (img_batch, target_batch) in enumerate(valid_dataloader):
                     
+                    if batch_idx == 50:
+                        break
+                    
                     img = img_batch.to(device)
                     target = target_batch.to(device)
                     
@@ -150,11 +169,6 @@ def train():
                 'lr': cur_lr
             })
         
-        print("@@@"*40)
-        print('make signature')
-        print(img.shape)
-        print(type(img))
-        print(pred.shape)
         # model_signature = infer_signature(train_data, pred)
         input_schema = Schema([
             TensorSpec(np.dtype(np.float32), (-1, 3, 32, 32))
@@ -164,13 +178,11 @@ def train():
         ])
         mlflow.pytorch.log_model(
             model,
-            artifact_path='test_resnet',
+            artifact_path="test_resnet",
             signature=ModelSignature(inputs=input_schema, outputs=output_schema),
+            conda_env=conda_env
         )
         print("Model saved in run %s" % mlflow.active_run().info.run_uuid)
-
-    
-    # print(model)
     
 
 if __name__ == "__main__":
@@ -184,8 +196,6 @@ if __name__ == "__main__":
     parser.add_argument("--init_layers", type=int, default=1)
     
     args = parser.parse_args()    
-    # params = Params(args.batch_size, args.epochs, args.lr, args.num_workers, args.device_id, args.cuda)
     
     train()
     
-    pass
