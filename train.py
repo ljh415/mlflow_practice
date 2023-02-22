@@ -8,9 +8,9 @@ import mlflow
 from mlflow.models.signature import ModelSignature
 from mlflow.types.schema import Schema, TensorSpec
 
-from model import TestResNet, PlainCNN
-from dataset import Cifar10DataLoader
-from utils import fix_seed, get_now
+from sources.model import TestResNet, PlainCNN
+from sources.dataset import Cifar10DataLoader
+from sources.utils import fix_seed, get_now
 
 fix_seed()
 
@@ -167,16 +167,14 @@ def train():
         print("Model saved in run %s" % mlflow.active_run().info.run_uuid)
         mlflow.end_run()
 
-def test():
+def inference():
     
-    pass
-
-def main():
     pass
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # train
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-1)
@@ -187,6 +185,8 @@ if __name__ == "__main__":
     parser.add_argument("--mlflow", action="store_true")
     parser.add_argument("--model", type=str, default='plain_cnn')
     parser.add_argument("--run_name", type=str, default=None)
+    # inference
+    
     
     args = parser.parse_args()
     
